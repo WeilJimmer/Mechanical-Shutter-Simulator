@@ -14,7 +14,12 @@
 <body>
     <canvas id="shutterCanvas" width="800" height="600"></canvas>
     <hr>
-    <button id="startBtn">開始動畫</button>
+    <button id="startBtn" title="init">開始動畫</button>
+    <button id="resetBtn">重置</button>
+    <hr>
+    快門時間：
+    <input type="number" id="shutterSpeedNumerator" value="1" min="1" style="width:50px"> / 
+    <input type="number" id="shutterSpeedDenominator" value="250" style="width:50px"> 秒 
     <button id="s1_30">1/30s</button>
     <button id="s1_60">1/60s</button>
     <button id="s1_125">1/125s</button>
@@ -25,9 +30,15 @@
     <button id="s1_4000">1/4000s</button>
     <button id="s1_8000">1/8000s</button>
     <hr>
-    快門時間：
-    <input type="number" id="shutterSpeedNumerator" value="1" min="1" style="width:50px"> / 
-    <input type="number" id="shutterSpeedDenominator" value="250" style="width:50px"> 秒 
+    光源：
+    <input type="radio" id="light_type1" name="lightType" value="radial" checked> 點光源
+    <input type="radio" id="light_type2" name="lightType" value="linear"> 平行光源
+    光量：<input type="number" id="light_count" value="2000" style="width:50px">（僅點光源有效）
+    <hr>
+    光點 X 座標：<input type="range" id="lightX" value="400" min="0" max="800">
+    光點 Y 座標：<input type="range" id="lightY" value="300" min="0" max="600">
+    <hr>
+    空隙：<input type="number" id="space_px" value="10" style="width:50px"> px
     <hr>
     模擬速度：1秒實際時間 = 1 / <input type="number" id="speedRange" value="250" min="1" max="1000" >秒 模擬時間
 
@@ -35,9 +46,16 @@
         const canvas = document.getElementById('shutterCanvas');
         const ctx = canvas.getContext('2d');
         const startBtn = document.getElementById('startBtn');
+        const resetBtn = document.getElementById('resetBtn');
         const speedRange = document.getElementById('speedRange');
         const shutterSpeedNumerator = document.getElementById('shutterSpeedNumerator');
         const shutterSpeedDenominator = document.getElementById('shutterSpeedDenominator');
+        const lightTypeRadio1 = document.getElementById('light_type1');
+        const lightTypeRadio2 = document.getElementById('light_type2');
+        const lightCount = document.getElementById('light_count');
+        const lightX = document.getElementById('lightX');
+        const lightY = document.getElementById('lightY');
+        const spacePx = document.getElementById('space_px');
 
         // 範例按鈕
         const s1_30 = document.getElementById('s1_30');
@@ -51,7 +69,7 @@
         const s1_8000 = document.getElementById('s1_8000');
 
         // 基本設定
-        const space = 10;          // 間距
+        let space = 10;          // 間距
         const rectWidth = 40;      // 矩形寬度
         const rectHeight = canvas.height/3;    // 矩形高度
         const containerWidth = canvas.width; // 容器寬度
@@ -62,8 +80,13 @@
         const cmosY = (containerHeight - rectHeight) / 2; // 置中
 
         // 後簾和前簾的X座標（固定）
-        const rearCurtainX = cmosX + rectWidth + space;
-        const frontCurtainX = cmosX + rectWidth + space;
+        let rearCurtainX = cmosX + rectWidth + space;
+        let frontCurtainX = cmosX + rectWidth + space;
+
+        let lightType = 'radial'; // 光線類型 radial or linear
+        let lightSourceX = containerWidth-rectWidth; // 光源X座標
+        let lightSourceY = containerHeight / 2; // 光源Y座標
+        let lightRay = 2000; // 光線數量
 
         // 初始Y座標
         let frontCurtainY = 0;  // 前簾在上方
@@ -74,11 +97,21 @@
         let startTime = null;
         let currentAnimationStep = null;
         let animationQueue = [];
+        let pausedTime = null;
+        let totalPausedTime = 0;
 
         // 在全局變量區域添加
         let simulatedTime = 0;
         let lastFrameTime = null;
         let REAL_TO_ANIMATED_RATIO = 250; // 1秒動畫時間 = 250分之1秒真實時間
+
+        function initUI() {
+            // 初始化 UI 元素
+            speedRange.value = REAL_TO_ANIMATED_RATIO;
+            lightCount.value = lightRay;
+            lightX.value = lightSourceX;
+            lightY.value = lightSourceY;
+        }
 
         // 動畫模組
         const AnimationModules = {
@@ -137,21 +170,6 @@
                     },
                     duration: CURTAIN_MOVEMENT_TIME + waitDuration
                 }
-                /*{
-                    type: 'frontCurtain',
-                    animation: AnimationModules.moveElement(cmosY, 0, 1.0), // 固定1秒
-                    duration: 1.0
-                },
-                {
-                    type: 'wait',
-                    animation: AnimationModules.wait(waitDuration),
-                    duration: waitDuration
-                },
-                {
-                    type: 'rearCurtain',
-                    animation: AnimationModules.moveElement(containerHeight - rectHeight, cmosY, 1.0), // 固定1秒
-                    duration: 1.0
-                }*/
             ];
         }
 
@@ -174,6 +192,114 @@
             ctx.font = '12px Arial';
             ctx.textAlign = 'center';
             ctx.fillText(label, x + width/2, y + height/2);
+        }
+
+        // 計算光線與矩形的交點
+        function rayRectangleIntersection(rayOriginX, rayOriginY, rayDirX, rayDirY, rectX, rectY, rectWidth, rectHeight) {
+            const dirfrac = {
+                x: 1.0 / rayDirX,
+                y: 1.0 / rayDirY
+            };
+
+            // 計算矩形的邊界
+            const t1 = (rectX - rayOriginX) * dirfrac.x;
+            const t2 = (rectX + rectWidth - rayOriginX) * dirfrac.x;
+            const t3 = (rectY - rayOriginY) * dirfrac.y;
+            const t4 = (rectY + rectHeight - rayOriginY) * dirfrac.y;
+
+            const tmin = Math.max(Math.min(t1, t2), Math.min(t3, t4));
+            const tmax = Math.min(Math.max(t1, t2), Math.max(t3, t4));
+
+            // 如果 tmax < 0，光線在矩形的反方向
+            // 如果 tmin > tmax，光線沒有擊中矩形
+            if (tmax < 0 || tmin > tmax) {
+                return null;
+            }
+
+            // 計算交點
+            return {
+                x: rayOriginX + tmin * rayDirX,
+                y: rayOriginY + tmin * rayDirY
+            };
+        }
+
+        function drawRadialLight(sourceX, sourceY) {
+            let RAY_COUNT = lightRay; // 光線數量
+            const MAX_DISTANCE = containerWidth + 100; // 最大射程
+
+            // 光源顏色設定
+            let lightColor = 'rgba(255, 128, 0, 0.8)'; // 預設黃色
+            if (currentAnimationStep >= 1) {
+                lightColor = 'rgba(0, 128, 0, 0.4)'; // 綠色
+            }
+
+            ctx.beginPath();
+            ctx.strokeStyle = lightColor;
+            ctx.lineWidth = 0.5;
+
+            // 計算所有需要檢查的矩形障礙物
+            const obstacles = [
+                // CMOS
+                {x: cmosX, y: cmosY, width: rectWidth, height: rectHeight, type: 'cmos'},
+                // 後簾
+                {x: rearCurtainX, y: rearCurtainY, width: rectWidth, height: rectHeight, type: 'rear'},
+                // 前簾
+                {x: frontCurtainX, y: frontCurtainY, width: rectWidth, height: rectHeight, type: 'front'},
+                // 容器
+                {x: 30, y: 0, width: 1, height: containerHeight}
+            ];
+
+            // 發射光線
+            for (let i = 0; i < RAY_COUNT; i++) {
+                const angle = (Math.PI * 2 * i) / RAY_COUNT;
+                const dirX = Math.cos(angle);
+                const dirY = Math.sin(angle);
+
+                // 光線追蹤
+                let rayX = sourceX;
+                let rayY = sourceY;
+                let hitPoint = null;
+                let hitObject = null;
+                let minDistance = MAX_DISTANCE;
+
+                // 檢查每個障礙物
+                for (const obstacle of obstacles) {
+                    // 計算光線與矩形的交點
+                    const intersection = rayRectangleIntersection(
+                        sourceX, sourceY, dirX, dirY,
+                        obstacle.x, obstacle.y, obstacle.width, obstacle.height
+                    );
+
+                    if (intersection) {
+                        const distance = Math.sqrt(
+                            Math.pow(intersection.x - sourceX, 2) + 
+                            Math.pow(intersection.y - sourceY, 2)
+                        );
+
+                        if (distance < minDistance) {
+                            minDistance = distance;
+                            hitPoint = intersection;
+                            hitObject = obstacle;
+                        }
+                    }
+                }
+
+                // 繪製光線
+                if (hitPoint) {
+                    ctx.beginPath();
+                    ctx.moveTo(sourceX, sourceY);
+                    ctx.lineTo(hitPoint.x, hitPoint.y);
+                    ctx.stroke();
+
+                    // 如果擊中CMOS，可以特別標記或處理
+                    if (hitObject.type === 'cmos') {
+                        ctx.beginPath();
+                        ctx.arc(hitPoint.x, hitPoint.y, 2, 0, Math.PI * 2);
+                        ctx.fillStyle = 'red';
+                        ctx.fill();
+                    }
+                }
+            }
         }
 
         function calculateLight() {
@@ -222,22 +348,42 @@
             ctx.strokeStyle = '#ccc';
             ctx.strokeRect(30, 0, frontCurtainX + rectWidth, containerHeight);
 
+            // 光線text
+            ctx.fillStyle = 'black';
+            ctx.font = '20px Arial';
+            ctx.textAlign = 'left';
+            ctx.fillText('Light', lightSourceX-20, lightSourceY - 20);
+
             // 計算光線
-            const light = calculateLight();
+            if (lightType === 'linear') {
 
-            // 只在有光線時才繪製
-            if (light) {
+                const light = calculateLight();
 
-                // 根據動畫步驟決定顏色
-                let lightColor = 'rgba(255, 255, 0, 0.3)'; // 預設黃色
+                // 只在有光線時才繪製
 
-                // 如果動畫正在進行且前簾開始上升（第二步）
-                if (isAnimating && currentAnimationStep >= 1) {
-                    lightColor = 'rgba(0, 255, 0, 0.3)'; // 綠色
+                if (light) {
+                    // 根據動畫步驟決定顏色
+                    let lightColor = 'rgba(255, 128, 0, 0.3)'; // 預設黃色
+
+                    // 如果動畫正在進行且前簾開始上升（第二步）
+                    if (isAnimating && currentAnimationStep >= 1) {
+                        lightColor = 'rgba(0, 255, 0, 0.3)'; // 綠色
+                    }
+                    ctx.fillStyle = lightColor;
+                    ctx.fillRect(50, light.y, containerWidth + 20, light.height);
                 }
-                ctx.fillStyle = lightColor;
-                ctx.fillRect(50, light.y, containerWidth + 20, light.height);
+            }else{
+
+                // 繪製光源點
+                ctx.beginPath();
+                ctx.arc(lightSourceX, lightSourceY, 5, 0, Math.PI * 2);
+                ctx.fillStyle = 'orange';
+                ctx.fill();
+
+                // 繪製放射狀光線
+                drawRadialLight(lightSourceX, lightSourceY);
             }
+            /**/
 
             // CMOS
             drawRainbowRect(cmosX, cmosY, rectWidth, rectHeight);
@@ -258,10 +404,13 @@
             ctx.textAlign = 'left';
             ctx.fillText(`前簾: ${Math.round(frontCurtainY)}~${Math.round(frontCurtainY + rectHeight)}`, 10, containerHeight-20);
             ctx.fillText(`後簾: ${Math.round(rearCurtainY)}~${Math.round(rearCurtainY + rectHeight)}`, 10, containerHeight-10);
-            if (light) {
-                ctx.fillText(`光線: ${Math.round(light.y)}~${Math.round(light.y + light.height)}`, 10, containerHeight-30);
+            if (lightType=='linear') {
+                if (light) {
+                    ctx.fillText(`光線: ${Math.round(light.y)}~${Math.round(light.y + light.height)}`, 10, containerHeight-30);
+                } else {
+                    ctx.fillText('光線: 完全遮擋', 10, containerHeight-30);
+                }
             } else {
-                ctx.fillText('光線: 完全遮擋', 10, containerHeight-30);
             }
 
             // 在右下角添加時間計數器
@@ -280,7 +429,11 @@
                 currentAnimationStep = 0;
                 simulatedTime = 0;
                 animationQueue = createAnimationSequence();
+                totalPausedTime = 0;
             }
+
+            // 計算實際經過的時間（扣除暫停時間）
+            const adjustedCurrentTime = currentTime - totalPausedTime;
 
             // 計算經過的模擬時間
             const deltaTime = parseFloat(currentTime - lastFrameTime); // 轉換為秒
@@ -289,7 +442,8 @@
 
             const step = animationQueue[currentAnimationStep];
             const stepStartTime = startTime + animationQueue.slice(0, currentAnimationStep).reduce((acc, s) => acc + s.duration * 1000, 0);
-            const progress = Math.min(1, (currentTime - stepStartTime) / (step.duration * 1000));
+            //const progress = Math.min(1, (currentTime - stepStartTime) / (step.duration * 1000));
+            const progress = Math.min(1, (adjustedCurrentTime - stepStartTime) / (step.duration * 1000));
 
             // 更新位置
             const result = step.animation(progress);
@@ -308,6 +462,9 @@
                 if (currentAnimationStep >= animationQueue.length) {
                     isAnimating = false;
                     draw();
+                    startBtn.setAttribute('title', 'init');
+                    startBtn.innerText = '開始動畫';
+                    draw();
                     return;
                 }
             }
@@ -317,15 +474,66 @@
             }
         }
 
-        startBtn.addEventListener('click', () => {
+        function startAnimation() {
             if (!isAnimating) {
                 isAnimating = true;
                 startTime = null;
-                simulatedTime = 0; // 重置計時器
+                pausedTime = null;
+                totalPausedTime = 0;
+                simulatedTime = 0;
                 frontCurtainY = 0;
                 rearCurtainY = containerHeight - rectHeight;
                 requestAnimationFrame(animate);
             }
+        }
+
+        function pauseAnimation() {
+            isAnimating = false;
+            pausedTime = performance.now(); // 記錄暫停時間點
+        }
+
+        function resumeAnimation() {
+            if (!isAnimating && pausedTime !== null) {
+                const currentTime = performance.now();
+                totalPausedTime += (currentTime - pausedTime); // 累加暫停的時間
+                lastFrameTime = currentTime;
+                isAnimating = true;
+                pausedTime = null;
+                requestAnimationFrame(animate);
+            }
+        }
+
+        startBtn.addEventListener('click', () => {
+            let state = startBtn.getAttribute('title') || 'init';
+            switch(state){
+                case 'init':
+                    startBtn.setAttribute('title', 'started');
+                    startBtn.innerText = '暫停動畫';
+                    startAnimation();
+                    break;
+                case 'started':
+                    startBtn.setAttribute('title', 'paused');
+                    startBtn.innerText = '繼續動畫';
+                    pauseAnimation();
+                    break;
+                case 'paused':
+                    startBtn.setAttribute('title', 'started');
+                    startBtn.innerText = '暫停動畫';
+                    resumeAnimation();
+                    break;
+            }
+        });
+        resetBtn.addEventListener('click', () => {
+            isAnimating = false;
+            startTime = null;
+            pausedTime = null;
+            totalPausedTime = 0;
+            simulatedTime = 0;
+            frontCurtainY = 0;
+            rearCurtainY = containerHeight - rectHeight;
+            startBtn.setAttribute('title', 'init');
+            startBtn.innerText = '開始動畫';
+            draw();
         });
 
         speedRange.addEventListener('input', () => {
@@ -383,6 +591,32 @@
         s1_8000.addEventListener('click', () => {
             shutterSpeedNumerator.value = 1;
             shutterSpeedDenominator.value = 8000;
+        });
+        lightTypeRadio1.addEventListener('change', () => {
+            lightType = 'radial';
+            draw();
+        });
+        lightTypeRadio2.addEventListener('change', () => {
+            lightType = 'linear';
+            draw();
+        });
+        lightCount.addEventListener('input', () => {
+            lightRay = parseInt(lightCount.value);
+            draw();
+        });
+        lightX.addEventListener('input', () => {
+            lightSourceX = parseInt(lightX.value);
+            draw();
+        });
+        lightY.addEventListener('input', () => {
+            lightSourceY = parseInt(lightY.value);
+            draw();
+        });
+        spacePx.addEventListener('input', () => {
+            space = parseInt(spacePx.value);
+            rearCurtainX = cmosX + rectWidth + space;
+            frontCurtainX = cmosX + rectWidth + space;
+            draw();
         });
 
         // 初始畫面

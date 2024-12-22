@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>機械快門模擬示意</title>
+    <style>
+        canvas {
+            border: 1px solid #333;
+            margin: 20px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="shutterCanvas" width="800" height="600"></canvas>
+    <hr>
+    <button id="startBtn">開始動畫</button>
+    <button id="s1_30">1/30s</button>
+    <button id="s1_60">1/60s</button>
+    <button id="s1_125">1/125s</button>
+    <button id="s1_250">1/250s</button>
+    <button id="s1_500">1/500s</button>
+    <button id="s1_1000">1/1000s</button>
+    <button id="s1_2000">1/2000s</button>
+    <button id="s1_4000">1/4000s</button>
+    <button id="s1_8000">1/8000s</button>
+    <hr>
+    快門時間：
+    <input type="number" id="shutterSpeedNumerator" value="1" min="1" style="width:50px"> / 
+    <input type="number" id="shutterSpeedDenominator" value="250" style="width:50px"> 秒 
+    <hr>
+    模擬速度：1秒實際時間 = 1 / <input type="number" id="speedRange" value="250" min="1" max="1000" >秒 模擬時間
+
+    <script>
+        const canvas = document.getElementById('shutterCanvas');
+        const ctx = canvas.getContext('2d');
+        const startBtn = document.getElementById('startBtn');
+        const speedRange = document.getElementById('speedRange');
+        const shutterSpeedNumerator = document.getElementById('shutterSpeedNumerator');
+        const shutterSpeedDenominator = document.getElementById('shutterSpeedDenominator');
+
+        // 範例按鈕
+        const s1_30 = document.getElementById('s1_30');
+        const s1_60 = document.getElementById('s1_60');
+        const s1_125 = document.getElementById('s1_125');
+        const s1_250 = document.getElementById('s1_250');
+        const s1_500 = document.getElementById('s1_500');
+        const s1_1000 = document.getElementById('s1_1000');
+        const s1_2000 = document.getElementById('s1_2000');
+        const s1_4000 = document.getElementById('s1_4000');
+        const s1_8000 = document.getElementById('s1_8000');
+
+        // 基本設定
+        const space = 10;          // 間距
+        const rectWidth = 40;      // 矩形寬度
+        const rectHeight = canvas.height/3;    // 矩形高度
+        const containerWidth = canvas.width; // 容器寬度
+        const containerHeight = canvas.height; // 容器高度
+
+        // CMOS 固定位置
+        const cmosX = 50;
+        const cmosY = (containerHeight - rectHeight) / 2; // 置中
+
+        // 後簾和前簾的X座標（固定）
+        const rearCurtainX = cmosX + rectWidth + space;
+        const frontCurtainX = rearCurtainX + rectWidth + space;
+
+        // 初始Y座標
+        let frontCurtainY = 0;  // 前簾在上方
+        let rearCurtainY = containerHeight - rectHeight;  // 後簾在下方
+
+        // 動畫控制
+        let isAnimating = false;
+        let startTime = null;
+        let currentAnimationStep = null;
+        let animationQueue = [];
+
+        // 在全局變量區域添加
+        let simulatedTime = 0;
+        let lastFrameTime = null;
+        let REAL_TO_ANIMATED_RATIO = 250; // 1秒動畫時間 = 250分之1秒真實時間
+
+        // 動畫模組
+        const AnimationModules = {
+            // 移動模組：從起始位置到目標位置
+            moveElement: (startY, targetY, duration) => {
+                return (progress) => {
+                    return startY + (targetY - startY) * progress;
+                };
+            },
+
+            // 等待模組
+            wait: (duration) => {
+                return (progress) => {
+                    return null; // 不需要更新位置
+                };
+            }
+        };
+
+        function calculateWaitDuration() {
+            const numerator = document.getElementById('shutterSpeedNumerator').value;
+            const denominator = document.getElementById('shutterSpeedDenominator').value;
+            return parseFloat(numerator/denominator*REAL_TO_ANIMATED_RATIO);
+        }
+
+        // 修改動畫序列生成器
+        function createAnimationSequence(options = {}) {
+            const waitDuration = calculateWaitDuration();
+            let CURTAIN_MOVEMENT_TIME = 1/250*REAL_TO_ANIMATED_RATIO;
+            return [
+                {
+                    type: 'frontCurtain',
+                    animation: AnimationModules.moveElement(0, cmosY, CURTAIN_MOVEMENT_TIME), // 固定1秒
+                    duration: CURTAIN_MOVEMENT_TIME
+                },
+                {
+                    type: 'both',  // 新增的類型，同時處理前簾上升和後簾上升
+                    animation: (progress) => {
+                        const totalDuration = CURTAIN_MOVEMENT_TIME + waitDuration;
+                        const normalizedProgress = progress * totalDuration;
+
+                        // 前簾上升（在第一個1秒內完成）
+                        if (normalizedProgress <= CURTAIN_MOVEMENT_TIME) {
+                            frontCurtainY = cmosY - (cmosY * (normalizedProgress / CURTAIN_MOVEMENT_TIME));
+                        }else{
+                            frontCurtainY = 0;
+                        }
+
+                        // 後簾上升（在等待時間結束後開始）
+                        if (normalizedProgress >= waitDuration) {
+                            const rearProgress = Math.min(1, (normalizedProgress - waitDuration) / CURTAIN_MOVEMENT_TIME);
+                            rearCurtainY = containerHeight - rectHeight + 
+                                ((cmosY - (containerHeight - rectHeight)) * rearProgress);
+                        }
+
+                        return null;
+                    },
+                    duration: CURTAIN_MOVEMENT_TIME + waitDuration
+                }
+                /*{
+                    type: 'frontCurtain',
+                    animation: AnimationModules.moveElement(cmosY, 0, 1.0), // 固定1秒
+                    duration: 1.0
+                },
+                {
+                    type: 'wait',
+                    animation: AnimationModules.wait(waitDuration),
+                    duration: waitDuration
+                },
+                {
+                    type: 'rearCurtain',
+                    animation: AnimationModules.moveElement(containerHeight - rectHeight, cmosY, 1.0), // 固定1秒
+                    duration: 1.0
+                }*/
+            ];
+        }
+
+        function drawRainbowRect(x, y, width, height) {
+            const gradient = ctx.createLinearGradient(x, y, x, y + height);
+            gradient.addColorStop(0, '#FF0000');
+            gradient.addColorStop(0.2, '#FF7F00');
+            gradient.addColorStop(0.4, '#FFFF00');
+            gradient.addColorStop(0.6, '#00FF00');
+            gradient.addColorStop(0.8, '#0000FF');
+            gradient.addColorStop(1, '#8B00FF');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(x, y, width, height);
+        }
+
+        function drawWithLabel(x, y, width, height, label, color) {
+            ctx.fillStyle = color;
+            ctx.fillRect(x, y, width, height);
+            ctx.fillStyle = '#fff';
+            ctx.font = '12px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(label, x + width/2, y + height/2);
+        }
+
+        function calculateLight() {
+            const lightY = rectHeight;
+            const lightHeight = rectHeight;
+            let resultY = lightY;
+            let resultHeight = lightHeight;
+            let lightRangeTop = lightY;
+            let lightRangeBottom = lightY + lightHeight;
+
+            // 計算前簾的遮擋
+            let frontTop = frontCurtainY;
+            let frontBottom = frontCurtainY + rectHeight;
+            if (frontBottom > lightRangeTop) {
+                lightRangeTop = frontBottom;
+            }
+
+            // 計算後簾的遮擋
+            let rearTop = rearCurtainY;
+            let rearBottom = rearCurtainY + rectHeight;
+            if (rearTop < lightRangeBottom) {
+                lightRangeBottom = rearTop;
+            }
+
+            // 計算光線的位置
+            resultY = lightRangeTop;
+            resultHeight = lightRangeBottom - lightRangeTop;
+
+            // 如果高度變成負數，代表完全遮擋
+            if (resultHeight <= 0) {
+                return null;
+            }
+
+            return {y: resultY, height: resultHeight};
+        }
+
+        function getSimulatedTimeText(s) {
+            let timer = (s/REAL_TO_ANIMATED_RATIO).toFixed(3);
+            return `${timer} ms`;
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // 容器
+            ctx.strokeStyle = '#ccc';
+            ctx.strokeRect(30, 0, frontCurtainX + rectWidth, containerHeight);
+
+            // 計算光線
+            const light = calculateLight();
+
+            // 只在有光線時才繪製
+            if (light) {
+
+                // 根據動畫步驟決定顏色
+                let lightColor = 'rgba(255, 255, 0, 0.3)'; // 預設黃色
+
+                // 如果動畫正在進行且前簾開始上升（第二步）
+                if (isAnimating && currentAnimationStep >= 1) {
+                    lightColor = 'rgba(0, 255, 0, 0.3)'; // 綠色
+                }
+                ctx.fillStyle = lightColor;
+                ctx.fillRect(50, light.y, containerWidth + 20, light.height);
+            }
+
+            // CMOS
+            drawRainbowRect(cmosX, cmosY, rectWidth, rectHeight);
+            ctx.fillStyle = '#000';
+            ctx.font = '12px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('CMOS', cmosX + rectWidth/2, cmosY - 5);
+
+            // 後簾
+            drawWithLabel(rearCurtainX, rearCurtainY, rectWidth, rectHeight, '後簾', 'rgba(0, 0, 0, 0.9)');
+
+            // 前簾
+            drawWithLabel(frontCurtainX, frontCurtainY, rectWidth, rectHeight, '前簾', 'rgba(0, 0, 0, 0.9)');
+
+            // 調試用：顯示當前位置
+            ctx.fillStyle = 'black';
+            ctx.font = '10px Arial';
+            ctx.textAlign = 'left';
+            ctx.fillText(`前簾: ${Math.round(frontCurtainY)}~${Math.round(frontCurtainY + rectHeight)}`, 10, containerHeight-20);
+            ctx.fillText(`後簾: ${Math.round(rearCurtainY)}~${Math.round(rearCurtainY + rectHeight)}`, 10, containerHeight-10);
+            if (light) {
+                ctx.fillText(`光線: ${Math.round(light.y)}~${Math.round(light.y + light.height)}`, 10, containerHeight-30);
+            } else {
+                ctx.fillText('光線: 完全遮擋', 10, containerHeight-30);
+            }
+
+            // 在右下角添加時間計數器
+            ctx.fillStyle = 'black';
+            ctx.font = '14px Arial';
+            ctx.textAlign = 'right';
+            let displayTime = getSimulatedTimeText((simulatedTime).toFixed(0)); // 轉換為毫秒並四捨五入
+            ctx.fillText(`${displayTime}`, canvas.width - 10, canvas.height - 10);
+
+        }
+
+        function animate(currentTime) {
+            if (!startTime) {
+                startTime = currentTime;
+                lastFrameTime = currentTime;
+                currentAnimationStep = 0;
+                simulatedTime = 0;
+                animationQueue = createAnimationSequence();
+            }
+
+            // 計算經過的模擬時間
+            const deltaTime = parseFloat(currentTime - lastFrameTime); // 轉換為秒
+            simulatedTime += deltaTime;
+            lastFrameTime = currentTime;
+
+            const step = animationQueue[currentAnimationStep];
+            const stepStartTime = startTime + animationQueue.slice(0, currentAnimationStep).reduce((acc, s) => acc + s.duration * 1000, 0);
+            const progress = Math.min(1, (currentTime - stepStartTime) / (step.duration * 1000));
+
+            // 更新位置
+            const result = step.animation(progress);
+            if (step.type === 'frontCurtain'){
+                frontCurtainY = result;
+            }
+            if (step.type === 'rearCurtain'){
+                rearCurtainY = result;
+            } else if (step.type === 'both') {
+            }
+
+            draw();
+
+            if (progress >= 1) {
+                currentAnimationStep++;
+                if (currentAnimationStep >= animationQueue.length) {
+                    isAnimating = false;
+                    draw();
+                    return;
+                }
+            }
+
+            if (isAnimating) {
+                requestAnimationFrame(animate);
+            }
+        }
+
+        startBtn.addEventListener('click', () => {
+            if (!isAnimating) {
+                isAnimating = true;
+                startTime = null;
+                simulatedTime = 0; // 重置計時器
+                frontCurtainY = 0;
+                rearCurtainY = containerHeight - rectHeight;
+                requestAnimationFrame(animate);
+            }
+        });
+
+        speedRange.addEventListener('input', () => {
+            REAL_TO_ANIMATED_RATIO = parseFloat(speedRange.value);
+        });
+
+        s1_30.addEventListener('click', () => {
+            shutterSpeedNumerator.value = 1;
+            shutterSpeedDenominator.value = 30;
+            speedRange.value = 15;
+            REAL_TO_ANIMATED_RATIO = 15;
+        });
+
+        s1_60.addEventListener('click', () => {
+            shutterSpeedNumerator.value = 1;
+            shutterSpeedDenominator.value = 60;
+            speedRange.value = 15;
+            REAL_TO_ANIMATED_RATIO = 15;
+        });
+
+        s1_125.addEventListener('click', () => {
+            shutterSpeedNumerator.value = 1;
+            shutterSpeedDenominator.value = 125;
+            speedRange.value = 60;
+            REAL_TO_ANIMATED_RATIO = 60;
+        });
+
+        s1_250.addEventListener('click', () => {
+            shutterSpeedNumerator.value = 1;
+            shutterSpeedDenominator.value = 250;
+            speedRange.value = 250;
+            REAL_TO_ANIMATED_RATIO = 250;
+        });
+
+        s1_500.addEventListener('click', () => {
+            shutterSpeedNumerator.value = 1;
+            shutterSpeedDenominator.value = 500;
+        });
+
+        s1_1000.addEventListener('click', () => {
+            shutterSpeedNumerator.value = 1;
+            shutterSpeedDenominator.value = 1000;
+        });
+
+        s1_2000.addEventListener('click', () => {
+            shutterSpeedNumerator.value = 1;
+            shutterSpeedDenominator.value = 2000;
+        });
+
+        s1_4000.addEventListener('click', () => {
+            shutterSpeedNumerator.value = 1;
+            shutterSpeedDenominator.value = 4000;
+        });
+
+        s1_8000.addEventListener('click', () => {
+            shutterSpeedNumerator.value = 1;
+            shutterSpeedDenominator.value = 8000;
+        });
+
+        // 初始畫面
+        draw();
+    </script>
+</body>
+</html>

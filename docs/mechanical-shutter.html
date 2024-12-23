@@ -14,6 +14,10 @@
 <body>
     <canvas id="shutterCanvas" width="800" height="600"></canvas>
     <hr>
+    <select id="shutter_type">
+        <option value="1">機械前簾快門</option>
+        <option value="2">電子前簾快門</option>
+    </select>
     <button id="startBtn" title="init">開始動畫</button>
     <button id="resetBtn">重置</button>
     <hr>
@@ -56,6 +60,7 @@
         const lightX = document.getElementById('lightX');
         const lightY = document.getElementById('lightY');
         const spacePx = document.getElementById('space_px');
+        const shutter_type = document.getElementById('shutter_type');
 
         // 範例按鈕
         const s1_30 = document.getElementById('s1_30');
@@ -69,6 +74,7 @@
         const s1_8000 = document.getElementById('s1_8000');
 
         // 基本設定
+        let shutterType = 1; // 1: 機械前簾快門, 2: 電子前簾快門
         let space = 10;          // 間距
         const rectWidth = 20;      // 矩形寬度
         const rectHeight = canvas.height/3;    // 矩形高度
@@ -105,6 +111,14 @@
         let simulatedTime = 0;
         let lastFrameTime = null;
         let REAL_TO_ANIMATED_RATIO = 250; // 1秒動畫時間 = 250分之1秒真實時間
+
+        function getShutterWidth(type=1){
+            if (type==1){
+                return rectWidth;
+            }else{
+                return 5;
+            }
+        }
 
         function initUI() {
             // 初始化 UI 元素
@@ -242,13 +256,18 @@
             const obstacles = [
                 // CMOS
                 {x: cmosX, y: cmosY, width: rectWidth, height: rectHeight, type: 'cmos'},
+                // 前簾
+                {x: frontCurtainX, y: frontCurtainY, width: getShutterWidth(shutterType), height: rectHeight, type: 'front'},
                 // 後簾
                 {x: rearCurtainX, y: rearCurtainY, width: rectWidth, height: rectHeight, type: 'rear'},
-                // 前簾
-                {x: frontCurtainX, y: frontCurtainY, width: rectWidth, height: rectHeight, type: 'front'},
                 // 容器
                 {x: 30, y: 0, width: 1, height: containerHeight}
             ];
+
+            /*if (shutterType==1){
+                // 機械快門
+                obstacles.push({x: frontCurtainX, y: frontCurtainY, width: getShutterWidth(shutterType), height: rectHeight, type: 'front'});  // 前簾
+            }*/
 
             // 發射光線
             for (let i = 0; i < RAY_COUNT; i++) {
@@ -396,7 +415,12 @@
             drawWithLabel(rearCurtainX, rearCurtainY, rectWidth, rectHeight, '後簾', 'rgba(0, 0, 0, 0.9)');
 
             // 前簾
-            drawWithLabel(frontCurtainX, frontCurtainY, rectWidth, rectHeight, '前簾', 'rgba(0, 0, 0, 0.9)');
+            if (shutterType==1){
+                // 機械快門
+                drawWithLabel(frontCurtainX, frontCurtainY, getShutterWidth(shutterType), rectHeight, '前簾', 'rgba(0, 0, 0, 0.9)');
+            }else{
+                drawWithLabel(frontCurtainX, frontCurtainY, getShutterWidth(shutterType), rectHeight, '前簾', 'rgba(0, 0, 255, 0.9)');
+            }
 
             // 調試用：顯示當前位置
             ctx.fillStyle = 'black';
@@ -615,7 +639,24 @@
         spacePx.addEventListener('input', () => {
             space = parseInt(spacePx.value);
             rearCurtainX = cmosX + rectWidth + space;
-            frontCurtainX = cmosX + rectWidth + space;
+            if (shutterType==1){
+                // 機械快門
+                frontCurtainX = cmosX + rectWidth + space;
+            }else{
+                // 電子快門
+                frontCurtainX = cmosX + rectWidth;
+            }
+            draw();
+        });
+        shutter_type.addEventListener('change', () => {
+            shutterType = parseInt(shutter_type.value);
+            if (shutterType==1){
+                // 機械快門
+                frontCurtainX = cmosX + rectWidth + space;
+            }else{
+                // 電子快門
+                frontCurtainX = cmosX + rectWidth;
+            }
             draw();
         });
 

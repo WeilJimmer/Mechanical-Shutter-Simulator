@@ -70,7 +70,7 @@
 
         // 基本設定
         let space = 10;          // 間距
-        const rectWidth = 40;      // 矩形寬度
+        const rectWidth = 20;      // 矩形寬度
         const rectHeight = canvas.height/3;    // 矩形高度
         const containerWidth = canvas.width; // 容器寬度
         const containerHeight = canvas.height; // 容器高度
@@ -189,10 +189,10 @@
         function drawWithLabel(x, y, width, height, label, color) {
             ctx.fillStyle = color;
             ctx.fillRect(x, y, width, height);
-            ctx.fillStyle = '#fff';
+            ctx.fillStyle = '#00f';
             ctx.font = '12px Arial';
             ctx.textAlign = 'center';
-            ctx.fillText(label, x + width/2, y + height/2);
+            ctx.fillText(label, x + width + 20, y + height/2);
         }
 
         // 計算光線與矩形的交點
@@ -347,7 +347,7 @@
 
             // 容器
             ctx.strokeStyle = '#ccc';
-            ctx.strokeRect(30, 0, frontCurtainX + rectWidth, containerHeight);
+            ctx.strokeRect(30, 0, frontCurtainX + rectWidth * 2, containerHeight);
 
             // 光線text
             ctx.fillStyle = 'black';
@@ -384,7 +384,6 @@
                 // 繪製放射狀光線
                 drawRadialLight(lightSourceX, lightSourceY);
             }
-            /**/
 
             // CMOS
             drawRainbowRect(cmosX, cmosY, rectWidth, rectHeight);

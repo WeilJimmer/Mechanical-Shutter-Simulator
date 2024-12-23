@@ -83,6 +83,7 @@
         let rearCurtainX = cmosX + rectWidth + space;
         let frontCurtainX = cmosX + rectWidth + space;
 
+        var light = null; // 光線位置
         let lightType = 'radial'; // 光線類型 radial or linear
         let lightSourceX = containerWidth-rectWidth; // 光源X座標
         let lightSourceY = containerHeight / 2; // 光源Y座標
@@ -357,7 +358,7 @@
             // 計算光線
             if (lightType === 'linear') {
 
-                const light = calculateLight();
+                light = calculateLight();
 
                 // 只在有光線時才繪製
 
